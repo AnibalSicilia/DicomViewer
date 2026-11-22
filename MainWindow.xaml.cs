@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -36,10 +37,6 @@ namespace DicomViewer
                            RetrieveMethod.WadoRs),
         };
 
-        // Temporary: The BRAINIX FLAIR series on Orthanc (step 22-23 let the user choose)
-        private const string StudyUid = "2.16.840.1.113669.632.20.1211.10000357775";
-        private const string SeriesUid = "1.3.46.670589.11.0.0.11.4.2.0.8743.5.5396.2006120114285654497";
-
         // One HttpClient for the whole app (creating a new one per request is a known bad habit)
         internal static readonly HttpClient Http = new HttpClient();
 
@@ -61,18 +58,20 @@ namespace DicomViewer
 
         private void ServerBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            DownloadButton.IsEnabled = ServerBox.SelectedItem != null;
             BrowseButton.IsEnabled = ServerBox.SelectedItem != null;
             ServerPlaceholder.Visibility = ServerBox.SelectedItem == null
                 ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        // Opens the Studies window for the chosen server
-        private void BrowseButton_Click(object sender, RoutedEventArgs e)
+        // Opens the Studies window; if the user pick a series, download it
+        private async void BrowseButton_Click(object sender, RoutedEventArgs e)
         {
             var server = (PacsServer)ServerBox.SelectedItem;
             var browser = new StudyBrowserWindow(server) { Owner = this };
-            browser.ShowDialog();
+            if (browser.ShowDialog() != true)
+                return; // closed without choosing a series
+
+            await DownloadSeriesAsync(server, browser.SelectedStudyUid, browser.SelectedSeriesUid);
         }
 
         private void OpenButton_Click(object sender, RoutedEventArgs e)
@@ -106,9 +105,9 @@ namespace DicomViewer
 
         }
 
-        private async void DownloadButton_Click(Object sender, RoutedEventArgs e)
+        private async Task DownloadSeriesAsync(PacsServer server, string studyUid, string seriesUid)
         {
-            var server = (PacsServer)ServerBox.SelectedItem; // SelectedItem holds any type, so it needs to be cast
+            //var server = (PacsServer)ServerBox.SelectedItem; // SelectedItem holds any type, so it needs to be cast
 
             if (server.Retrieve == RetrieveMethod.WadoRs)
             {
@@ -117,13 +116,13 @@ namespace DicomViewer
                 return;
             }
 
-            DownloadButton.IsEnabled = false; // stop double clicks while downloading
+            BrowseButton.IsEnabled = false; // stop double clicks while downloading
             InfoText.Text = "Asking the PACS for the list of images...";
 
             try
             {
                 // 1. QIDO-RS: ask for the list of images in the series (same as in the browser)
-                string listUrl = $"{server.DicomWebRoot}/studies/{StudyUid}/series/{SeriesUid}/instances";
+                string listUrl = $"{server.DicomWebRoot}/studies/{studyUid}/series/{seriesUid}/instances";
                 string json = await Http.GetStringAsync(listUrl);
 
                 // 2. Read each image's SOP Instance UID (tag 0008, 0018) from the JSON
@@ -132,8 +131,7 @@ namespace DicomViewer
                 {
                     foreach(JsonElement item in doc.RootElement.EnumerateArray())
                     {
-                        string uid = item.GetProperty("00080018").GetProperty("Value")[0].GetString()!;
-                        instanceUids.Add(uid);
+                        instanceUids.Add(DicomJson.GetText(item, "00080018"));
                     }
                 }
 
@@ -145,7 +143,7 @@ namespace DicomViewer
                     InfoText.Text = $"Downloading image {i + 1} / {instanceUids.Count}...";
 
                     string imageUrl = $"{server.WadoUriRoot}?requestType=WADO" +
-                        $"&studyUID={StudyUid}&seriesUID={SeriesUid}" +
+                        $"&studyUID={studyUid}&seriesUID={seriesUid}" +
                         $"&objectUID={instanceUids[i]}&contentType=application/dicom";
                     byte[] data = await Http.GetByteArrayAsync(imageUrl);
 
@@ -159,14 +157,10 @@ namespace DicomViewer
                 // 4. Sort by instance number, so the slices go in order through the head
                 _slices.Sort((a, b) => a.Number.CompareTo(b.Number));
 
-                // Temporary test: show the first slice (step 16 replaces this with the grid)
-                //ScanImage.Source = _slices[0].Picture;
-                //InfoText.Text = $"Downloaded {_slices.Count} slices. First is number {_slices[0].Number}, " +
-                //$"last is number {_slices[^1].Number}.";
                 // 5. Make one thumbnail per slice and show the grid
                 BuildThumbnails();
                 BuildHeader();
-                ShowGridModel();
+                ShowGridMode();
             }
             catch (Exception ex)
             {
@@ -175,9 +169,8 @@ namespace DicomViewer
             }
             finally
             {
-                DownloadButton.IsEnabled = true;
+                BrowseButton.IsEnabled = true;
             }
-
         }
 
         // Turns the DICOM pixel data into a picture WPF can show
@@ -338,7 +331,7 @@ namespace DicomViewer
         // ---- The three view modes: only the column width change ----
         
         // Mode 1: thumbnails use all the space
-        private void ShowGridModel()
+        private void ShowGridMode()
         {
             ThumbnailColumn.Width = new GridLength(1, GridUnitType.Star);
             SliceColumn.Width = new GridLength(0);
@@ -386,7 +379,7 @@ namespace DicomViewer
         // Events that still need to be implemented
         private void BackToGridButton_Click(object sender, RoutedEventArgs e) 
         {
-            ShowGridModel();
+            ShowGridMode();
         }
 
         // ---- Navigation ----

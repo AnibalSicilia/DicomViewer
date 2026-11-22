@@ -18,6 +18,9 @@ namespace DicomViewer
             string Description, string ImageCount);
         // The servers we are browsing
         private readonly PacsServer _server;
+        // What the user chose (MainWindow reads these after the windows closes)
+        public string SelectedStudyUid { get; private set; } = "";
+        public string SelectedSeriesUid { get; private set; } = "";
         public StudyBrowserWindow(PacsServer server)
         {
             InitializeComponent();
@@ -71,6 +74,7 @@ namespace DicomViewer
         private async void StudyList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             SeriesList.ItemsSource = null;  // clear the old series
+            OpenSeriesButton.IsEnabled = false; // no series chosen yet
 
             if (StudyList.SelectedItem is not StudyRow study)
                 return; // nothing selected
@@ -119,6 +123,35 @@ namespace DicomViewer
             {
                 StatusText.Text = $"Could not load the series: {ex.Message}";
             }
+        }
+
+        // A series is selected: the Open button can be used
+        private void SeriesList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            OpenSeriesButton.IsEnabled = SeriesList.SelectedItem != null;
+        }
+
+        // Double-click on a series: open it straight away
+        private void SeriesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (SeriesList.SelectedItem != null)
+                OpenSelectedSeries();
+        }
+
+        private void OpenSeriesButton_Click(object sender, RoutedEventArgs e)
+        {
+            OpenSelectedSeries();
+        }
+
+        private void OpenSelectedSeries()
+        {
+            var study = (StudyRow)StudyList.SelectedItem;
+            var series = (SeriesRow)SeriesList.SelectedItem;
+
+            SelectedStudyUid = study.StudyUid;
+            SelectedSeriesUid = series.SeriesUid;
+
+            DialogResult = true; // closes the window; ShowDialog() returns true;
         }
     }
 }

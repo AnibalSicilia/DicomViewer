@@ -19,8 +19,6 @@
                            Foreground="Black" VerticalAlignment="Center" Margin="8,0,0,0"
                            IsHitTestVisible="False"/>
             </Grid>
-            <Button x:Name="DownloadButton" Content="Download series from PACS" Padding="10,5"
-                    Margin="10,0,0,0" Click="DownloadButton_Click" IsEnabled="False"/>
             <Button x:Name="BrowseButton" Content="Browse studies..." Padding="10,5" 
                     Margin="10,0,0,0" Click="BrowseButton_Click"
                     IsEnabled="False"/>
