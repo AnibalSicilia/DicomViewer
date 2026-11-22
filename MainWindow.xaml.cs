@@ -228,6 +228,7 @@ namespace DicomViewer
             int position = (int)((Border)sender).Tag;
             ShowSplitMode();
             ShowSlice(position);
+            e.Handled = true; // Don't let the click reach the empty-space handler
         }
 
         // Shows the slice at this position large, and highlights its thumbnail
@@ -373,6 +374,17 @@ namespace DicomViewer
                 MoveBy(+1);
                 e.Handled = true;
             }
+        }
+
+        // Click on empty space in the grid: remove the selection
+        private void ThumbnailView_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            bool isGrid = SliceColumn.Width.Value == 0;
+            if (!isGrid || _current < 0)
+                return; // only in Grid mode, and only if something is selected
+
+            ((Border)ThumbnailPanel.Children[_current]).BorderBrush = Brushes.Transparent;
+            _current = -1;  // nothing selected any more
         }
     }
 }

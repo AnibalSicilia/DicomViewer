@@ -32,10 +32,12 @@
             </Grid.ColumnDefinitions>
             
 
-            <!-- LEFT COLUMN: thumbnails (grid when waid, filmstrip when narrow) -->
+            <!-- LEFT COLUMN: thumbnails (grid when wide, filmstrip when narrow) -->
             <ScrollViewer x:Name="ThumbnailView" Grid.Column="0"
                           VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="Transparent"
+                          MouseLeftButtonUp="ThumbnailView_MouseLeftButtonUp">
                 <WrapPanel x:Name="ThumbnailPanel" Margin="5"/>
             </ScrollViewer>
             
