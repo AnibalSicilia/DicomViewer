@@ -39,7 +39,7 @@
                 <GridView>
                     <GridViewColumn Header="#" Width="60" DisplayMemberBinding="{Binding Number}" />
                     <GridViewColumn Header="Modality" Width="80" DisplayMemberBinding="{Binding Modality}" />
-                    <GridViewColumn Header="Description" Width="380" DisplayMemberBinding="{Binding Descriptions}" />
+                    <GridViewColumn Header="Description" Width="380" DisplayMemberBinding="{Binding Description}" />
                     <GridViewColumn Header="Images" Width="70" DisplayMemberBinding="{Binding ImageCount}" />
                 </GridView>
             </ListView.View>
