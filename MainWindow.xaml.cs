@@ -23,15 +23,30 @@ namespace DicomViewer
     /// </summary>
     public partial class MainWindow : Window
     {
-        // The WADO-URI address of one brain MRI slice: study -> series -> image
-        //private const string PacsUrl =
-        //"https://orthanc.uclouvain.be/demo/wado?requestType=WADO" +
-        //"&studyUID=2.16.840.1.113669.632.20.1211.10000357775" +
-        //"&seriesUID=1.3.46.670589.11.0.0.11.4.2.0.8743.5.5396.2006120114285654497" +
-        //"&objectUID=1.3.46.670589.11.0.0.11.4.2.0.8743.5.5396.2006120114313982544" +
-        //"&contentType=application/dicom";
-        // Where the series lives on the PACS: server -> study -> series
-        private const string Server = "https://orthanc.uclouvain.be/demo";
+        // How a server let us download images
+        private enum RetrieveMethod { WadoUri, WadoRs }
+
+        // One PACS (Picture Archiving and Communication System) the app can connect to
+        private record PacsServer(string Name, string DicomWebRoot, string WadoUriRoot, RetrieveMethod Retrieve )
+        {
+            public override string ToString() => Name; // What the dropdown shows
+
+        }
+
+        // The servers in the dropdown
+        private static readonly PacsServer[] Servers =
+        {
+            new PacsServer("Orthanc demo (Belgium)",
+                           "https://orthanc.uclouvain.be/demo/dicom-web",
+                           "https://orthanc.uclouvain.be/demo/wado", 
+                           RetrieveMethod.WadoUri),
+            new PacsServer("NCI Imaging Data Commons",
+                           "https://proxy.imaging.datacommons.cancer.gov/current/viewer-only-no-downloads-see-tinyurl-dot-com-slash-3j3d9jyp/dicomWeb",
+                           "",  // IDC has no WADO-URI
+                           RetrieveMethod.WadoRs),
+        };
+
+        // Temporary: The BRAINIX FLAIR series on Orthanc (step 22-23 let the user choose)
         private const string StudyUid = "2.16.840.1.113669.632.20.1211.10000357775";
         private const string SeriesUid = "1.3.46.670589.11.0.0.11.4.2.0.8743.5.5396.2006120114285654497";
 
@@ -50,6 +65,16 @@ namespace DicomViewer
         public MainWindow()
         {
             InitializeComponent();
+
+            ServerBox.ItemsSource = Servers; // put the servers in the dropdown, (no server preselected: the user chooses)
+        }
+
+        private void ServerBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            DownloadButton.IsEnabled = ServerBox.SelectedItem != null;
+
+            ServerPlaceholder.Visibility = ServerBox.SelectedItem == null
+                ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void OpenButton_Click(object sender, RoutedEventArgs e)
@@ -85,23 +110,22 @@ namespace DicomViewer
 
         private async void DownloadButton_Click(Object sender, RoutedEventArgs e)
         {
+            var server = (PacsServer)ServerBox.SelectedItem; // SelectedItem holds any type, so it needs to be cast
+
+            if (server.Retrieve == RetrieveMethod.WadoRs)
+            {
+                MessageBox.Show($"Downloading from \"{server.Name}\" needs WADO-RS, " + 
+                    "which we add in a later step.", "Not supported yet");
+                return;
+            }
+
             DownloadButton.IsEnabled = false; // stop double clicks while downloading
             InfoText.Text = "Asking the PACS for the list of images...";
 
             try
             {
-                // Ask the server for the file (same address you just hardcoded)
-                //byte[] data = await Http.GetByteArrayAsync(PacsUrl);
-
-                // Open it from memory instead of from disk
-                //using var stream = new MemoryStream(data);
-                //DicomFile file = DicomFile.Open(stream, FileReadOption.ReadAll);
-
-                // call the method (same as open button)
-                //ShowDicom(file);
-
                 // 1. QIDO-RS: ask for the list of images in the series (same as in the browser)
-                string listUrl = $"{Server}/dicom-web/studies/{StudyUid}/series/{SeriesUid}/instances";
+                string listUrl = $"{server.DicomWebRoot}/studies/{StudyUid}/series/{SeriesUid}/instances";
                 string json = await Http.GetStringAsync(listUrl);
 
                 // 2. Read each image's SOP Instance UID (tag 0008, 0018) from the JSON
@@ -122,7 +146,7 @@ namespace DicomViewer
                 {
                     InfoText.Text = $"Downloading image {i + 1} / {instanceUids.Count}...";
 
-                    string imageUrl = $"{Server}/wado?requestType=WADO" +
+                    string imageUrl = $"{server.WadoUriRoot}?requestType=WADO" +
                         $"&studyUID={StudyUid}&seriesUID={SeriesUid}" +
                         $"&objectUID={instanceUids[i]}&contentType=application/dicom";
                     byte[] data = await Http.GetByteArrayAsync(imageUrl);

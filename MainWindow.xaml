@@ -11,8 +11,16 @@
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
             <Button x:Name="OpenButton" Content="Open DICOM file..." Padding="10,5" 
                     Click="OpenButton_Click"/>
+            <TextBlock Text="Server:" VerticalAlignment="Center" Margin="20,0,5,0"/>
+            <Grid Width="230">
+                <ComboBox x:Name="ServerBox" Width="230" VerticalContentAlignment="Center" 
+                          SelectionChanged="ServerBox_SelectionChanged"/>
+                <TextBlock x:Name="ServerPlaceholder" Text="Select a server..."
+                           Foreground="Black" VerticalAlignment="Center" Margin="8,0,0,0"
+                           IsHitTestVisible="False"/>
+            </Grid>
             <Button x:Name="DownloadButton" Content="Download series from PACS" Padding="10,5"
-                    Margin="10,0,0,0" Click="DownloadButton_Click"/>
+                    Margin="10,0,0,0" Click="DownloadButton_Click" IsEnabled="False"/>
             <Button x:Name="BackToGridButton" Content="Back to grid" Padding="10,5"
                     Margin="10,0,0,0" Visibility="Collapsed" Click="BackToGridButton_Click" />
         </StackPanel>
