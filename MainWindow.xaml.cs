@@ -107,51 +107,67 @@ namespace DicomViewer
 
         private async Task DownloadSeriesAsync(PacsServer server, string studyUid, string seriesUid)
         {
-            //var server = (PacsServer)ServerBox.SelectedItem; // SelectedItem holds any type, so it needs to be cast
-
-            if (server.Retrieve == RetrieveMethod.WadoRs)
-            {
-                MessageBox.Show($"Downloading from \"{server.Name}\" needs WADO-RS, " + 
-                    "which we add in a later step.", "Not supported yet");
-                return;
-            }
-
             BrowseButton.IsEnabled = false; // stop double clicks while downloading
             InfoText.Text = "Asking the PACS for the list of images...";
 
             try
             {
                 // 1. QIDO-RS: ask for the list of images in the series (same as in the browser)
-                string listUrl = $"{server.DicomWebRoot}/studies/{studyUid}/series/{seriesUid}/instances";
+                string listUrl = $"{server.DicomWebRoot}/studies/{studyUid}/series/{seriesUid}/instances?limit=1000";
                 string json = await Http.GetStringAsync(listUrl);
 
-                // 2. Read each image's SOP Instance UID (tag 0008, 0018) from the JSON
+                // 2. Read each image's SOP Instance UID (tag 0008,0018) from the JSON
                 var instanceUids = new List<string>();
-                using (JsonDocument doc = JsonDocument.Parse(json))
+
+
+                if (!string.IsNullOrWhiteSpace(json))                                          
                 {
-                    foreach(JsonElement item in doc.RootElement.EnumerateArray())
-                    {
+                    using JsonDocument doc = JsonDocument.Parse(json);
+                    foreach (JsonElement item in doc.RootElement.EnumerateArray())
                         instanceUids.Add(DicomJson.GetText(item, "00080018"));
-                    }
+                }
+
+                if (instanceUids.Count == 0)
+                {                                                                              
+                    InfoText.Text = "The server returned no images for this series.";         
+                    return;
                 }
 
                 // 3. WADO-URI: download each image, one after the other
                 // _slices.Clear();
                 ResetSeries();
+                int failed = 0;
+                string lastError = "";
+
                 for (int i = 0; i < instanceUids.Count; i++)
                 {
-                    InfoText.Text = $"Downloading image {i + 1} / {instanceUids.Count}...";
+                    InfoText.Text = $"Downloading image {i + 1} / {instanceUids.Count}..." +
+                                    (failed > 0 ? $"  ({failed} failed)" : "");
 
-                    string imageUrl = $"{server.WadoUriRoot}?requestType=WADO" +
-                        $"&studyUID={studyUid}&seriesUID={seriesUid}" +
-                        $"&objectUID={instanceUids[i]}&contentType=application/dicom";
-                    byte[] data = await Http.GetByteArrayAsync(imageUrl);
+                    try
+                    {
+                        byte[] data = await DownloadInstanceAsync(server, studyUid, seriesUid, instanceUids[i]);
 
-                    using var stream = new MemoryStream(data);
-                    DicomDataset ds = DicomFile.Open(stream, FileReadOption.ReadAll).Dataset;
+                        using var stream = new MemoryStream(data);
+                        DicomDataset ds = DicomFile.Open(stream, FileReadOption.ReadAll).Dataset;
 
-                    int number = ds.GetSingleValueOrDefault(DicomTag.InstanceNumber, 0);
-                    _slices.Add(new Slice(number, ds, Render(ds)));
+                        int number = ds.GetSingleValueOrDefault(DicomTag.InstanceNumber, 0);
+                        _slices.Add(new Slice(number, ds, Render(ds)));
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        lastError = $"{ex.GetType().Name}: {ex.Message}";
+                    }
+                }
+
+                // Nothing worked at all: say why
+                if(_slices.Count == 0)
+                {
+                    InfoText.Text = "Download failed";
+                    MessageBox.Show($"None of the {instanceUids.Count} images could be shown.\n\n" +
+                        $"Last error:\n{lastError}", "Error");
+                    return;
                 }
 
                 // 4. Sort by instance number, so the slices go in order through the head
@@ -161,17 +177,98 @@ namespace DicomViewer
                 BuildThumbnails();
                 BuildHeader();
                 ShowGridMode();
+
+                // Some worked, some didn't: show what we have and say how many are missing
+                if (failed > 0)
+                {
+                    InfoText.Text = $"{_slices.Count} of {instanceUids.Count} images shown;" +
+                        $"{failed} could not be downloaded or displayed. " +
+                        $"Last error: {lastError}";
+                }
             }
             catch (Exception ex)
             {
                 InfoText.Text = "Download failed";
-                MessageBox.Show($"Could not download the series:\n{ex.Message}", "Error");
+                MessageBox.Show($"Could not download the series:\n{ex.GetType().Name}: {ex.Message}", "Error");
             }
             finally
             {
                 BrowseButton.IsEnabled = true;
             }
         }
+
+        // Downloads one image (instance) as DICOM bytes, using the server's retrieve method
+        private static async Task<byte[]> DownloadInstanceAsync(PacsServer server, string studyUid, string seriesUid, string instanceUid)
+        {
+            // WADO-URI: one address wtih parameters; the answer is the plain .dcm file
+            if (server.Retrieve == RetrieveMethod.WadoUri)
+            {
+                string url = $"{server.WadoUriRoot}?requestType=WADO" + 
+                    $"&studyUID={studyUid}&seriesUID={seriesUid}" +
+                    $"&objectUID={instanceUid}&contentType=application/dicom";
+                return await Http.GetByteArrayAsync(url);
+            }
+
+            // WADO-RS: the address is a path; the format we want goes int the "Accept" header
+            string rsUrl = $"{server.DicomWebRoot}/studies/{studyUid}/series/{seriesUid}/instances/{instanceUid}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, rsUrl);
+            request.Headers.TryAddWithoutValidation("Accept",
+                "multipart/related; type=\"application/dicom\"; transfer-syntax=1.2.840.10008.1.2.1");
+
+            using HttpResponseMessage response = await Http.SendAsync(request);
+            response.EnsureSuccessStatusCode(); // turn HTTP errors (404, 500...) into exceptions
+            byte[] body = await response.Content.ReadAsByteArrayAsync();
+
+            // Some servers send the plain file anyway; then there is nothing to unwrap
+            string mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
+            if (mediaType != "multipart/related")
+                return body;
+
+            // The "boundary" is the separatr text between the parts of the package
+            string boundary = response.Content.Headers.ContentType!.Parameters
+                .First(p => p.Name.Equals("boundary", StringComparison.OrdinalIgnoreCase)).Value!.Trim('"');
+
+            return ExtractFirstPart(body, boundary);
+        }
+
+        // A multipart answer looks like this:
+        //  --boundary
+        // Content-Type: aplication/dicom
+        // (empty line)
+        // ...the DICOM file bytes...
+        // --boundary--
+        // This method returns just the file bytes
+        private static byte[] ExtractFirstPart(byte[] body, string boundary)
+        {
+            byte[] firstBoundary = Encoding.ASCII.GetBytes("--" + boundary);
+            byte[] headersEnd = Encoding.ASCII.GetBytes("\r\n\r\n"); // the empty
+            byte[] nextBoundary = Encoding.ASCII.GetBytes("\r\n--" + boundary);
+
+            int boundaryPos = IndexOf(body, firstBoundary, 0);
+            if (boundaryPos < 0)
+                throw new InvalidDataException("Multipart answer has no boundary");
+
+            int dataStart = IndexOf(body, headersEnd, boundaryPos);
+            if (dataStart < 0)
+                throw new InvalidDataException("Multipart answer has no headers end");
+            dataStart += headersEnd.Length; // skip the empty line itself
+
+            int dataEnd = IndexOf(body, nextBoundary, dataStart);
+            if (dataEnd < 0)
+                throw new InvalidDataException("Multipart answer has no closing boundary");
+
+            return body[dataStart..dataEnd];
+              
+        }
+
+        // Finds a sequesnce of bytes inside a larger array, starting at 'start'. Returns -1 if not found
+        private static int IndexOf(byte[] data, byte[] pattern, int start)
+        {
+            int position = data.AsSpan(start).IndexOf(pattern);
+            return position < 0 ? -1 : position + start;
+        }
+
 
         // Turns the DICOM pixel data into a picture WPF can show
         private static BitmapSource Render(DicomDataset ds)
