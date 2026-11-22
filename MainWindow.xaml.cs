@@ -266,6 +266,9 @@ namespace DicomViewer
             SliceColumn.Width = new GridLength(1, GridUnitType.Star);
             NavigationLayer.Visibility = Visibility.Collapsed;
             BackToGridButton.Visibility = Visibility.Collapsed;
+
+            SliceView.Cursor = null;
+            SliceView.ToolTip = null;
         }
 
         // ---- The three view modes: only the column width change ----
@@ -285,6 +288,33 @@ namespace DicomViewer
             ThumbnailColumn.Width = new GridLength(160);
             SliceColumn.Width = new GridLength(1, GridUnitType .Star);
             BackToGridButton.Visibility = Visibility.Visible;
+
+            SliceView.Cursor = Cursors.Hand;
+            SliceView.ToolTip = "Double-click to show the filmstrip";
+        }
+
+        // Mode 3: only the large slice, using all the space
+        private void ShowFullMode()
+        {
+            ThumbnailColumn.Width = new GridLength(0);
+            SliceColumn.Width = new GridLength(1, GridUnitType.Star);
+            BackToGridButton.Visibility = Visibility.Visible;
+
+            SliceView.Cursor = Cursors.Hand;
+            SliceView.ToolTip = "Double-click to show the filmstrip";
+        }
+
+        // Moves forward (+1) or back(-1) in the list, if possible
+        private void MoveBy(int step)
+        {
+            if (_current < 0)
+                return; // no series open
+
+            int target = _current + step;
+            if (target < 0 || target >= _slices.Count)
+                return; // already at the first or last slice
+
+            ShowSlice(target);
         }
 
         // Events that still need to be implemented
@@ -292,10 +322,57 @@ namespace DicomViewer
         {
             ShowGridModel();
         }
-        private void PreviousButton_Click(object sender, RoutedEventArgs e) { }
-        private void NextButton_Click(object sender, RoutedEventArgs e) { }
-        private void SliceView_MouseWheel(object sender, MouseWheelEventArgs e) { }
-        private void SliceView_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) { }
-        private void Window_KeyDown(object sender, KeyEventArgs e) { }
+
+        // ---- Navigation ----
+
+        // < and > buttons
+        private void PreviousButton_Click(object sender, RoutedEventArgs e) 
+        { 
+            MoveBy(-1);
+        }
+        private void NextButton_Click(object sender, RoutedEventArgs e) 
+        {
+            MoveBy(+1);
+        }
+
+        // Mouse wheel: up = previous slice, down = next slice
+        private void SliceView_MouseWheel(object sender, MouseWheelEventArgs e) 
+        { 
+            MoveBy(e.Delta > 0  ? -1 : +1);
+            e.Handled = true;
+        }
+
+        // Double click on the large slice: switch between Split and Full mode
+        private void SliceView_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) 
+        { 
+            if (e.ClickCount != 2 || _current < 0)
+                return;     // not a double click, or no series open
+
+            bool isFull = ThumbnailColumn.Width.Value == 0;
+            if (isFull)
+            {
+                ShowSplitMode();
+                ShowSlice(_current);    // scroll the filmstrip back to the current slice
+            }
+            else
+            {
+                ShowFullMode();
+            }
+        }
+
+        // Arrow keys: left/up = previous, right/down = next
+        private void Window_KeyDown(object sender, KeyEventArgs e) 
+        {
+            if(e.Key == Key.Left || e.Key == Key.Up)
+            {
+                MoveBy(-1);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Right || e.Key == Key.Down)
+            {
+                MoveBy(+1);
+                e.Handled = true;
+            }
+        }
     }
 }
