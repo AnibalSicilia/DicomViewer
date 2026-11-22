@@ -23,16 +23,6 @@ namespace DicomViewer
     /// </summary>
     public partial class MainWindow : Window
     {
-        // How a server let us download images
-        private enum RetrieveMethod { WadoUri, WadoRs }
-
-        // One PACS (Picture Archiving and Communication System) the app can connect to
-        private record PacsServer(string Name, string DicomWebRoot, string WadoUriRoot, RetrieveMethod Retrieve )
-        {
-            public override string ToString() => Name; // What the dropdown shows
-
-        }
-
         // The servers in the dropdown
         private static readonly PacsServer[] Servers =
         {
@@ -51,7 +41,7 @@ namespace DicomViewer
         private const string SeriesUid = "1.3.46.670589.11.0.0.11.4.2.0.8743.5.5396.2006120114285654497";
 
         // One HttpClient for the whole app (creating a new one per request is a known bad habit)
-        private static readonly HttpClient Http = new HttpClient();
+        internal static readonly HttpClient Http = new HttpClient();
 
         // One slice of the series: its number, its DICOM data and its picture
         private record Slice(int Number, DicomDataset Dataset, BitmapSource Picture);
@@ -278,7 +268,7 @@ namespace DicomViewer
         }
 
         //DICOM dates are written "20061201"; this shows them as "2006-12-01"
-        private static string FormatDate(string dicomDate)
+        internal static string FormatDate(string dicomDate)
         {
             if (DateTime.TryParseExact(dicomDate, "yyyyMMdd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out DateTime date))
