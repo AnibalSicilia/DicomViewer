@@ -10,13 +10,13 @@ Built as a learning project to understand the DICOM standard, PACS workflows and
 ![Grid view](docs/grid.png)
 ![Split view](docs/split.png)
 -->
-![Screenshot 1](img_dv.01.jpg)
+![Screenshot 1](Docs/img_dv.01.jpg)
 
-![Screenshot 2](img_dv.02.jpg)
+![Screenshot 2](Docs/img_dv.02.jpg)
 
-![Screenshot 3](img_dv.03.jpg)
+![Screenshot 3](Docs/img_dv.03.jpg)
 
-![Screenshot 4](img_dv.04.jpg)
+![Screenshot 4](Docs/img_dv.04.jpg)
 
 ## Features
 
