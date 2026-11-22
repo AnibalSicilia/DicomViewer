@@ -70,6 +70,7 @@ namespace DicomViewer
                 //DicomFile file = DicomFile.Open(dialog.FileName);
                 //ShowDicom(file);
                 DicomDataset ds = DicomFile.Open(dialog.FileName).Dataset;
+                ResetSeries(); // a single file has no series: hide thumbnails and < >
                 ScanImage.Source = Render(ds);
                 InfoText.Text = Describe(ds);
 
@@ -114,7 +115,8 @@ namespace DicomViewer
                 }
 
                 // 3. WADO-URI: download each image, one after the other
-                _slices.Clear();
+                // _slices.Clear();
+                ResetSeries();
                 for (int i = 0; i < instanceUids.Count; i++)
                 {
                     InfoText.Text = $"Downloading image {i + 1} / {instanceUids.Count}...";
@@ -135,9 +137,12 @@ namespace DicomViewer
                 _slices.Sort((a, b) => a.Number.CompareTo(b.Number));
 
                 // Temporary test: show the first slice (step 16 replaces this with the grid)
-                ScanImage.Source = _slices[0].Picture;
-                InfoText.Text = $"Downloaded {_slices.Count} slices. First is number {_slices[0].Number}, " +
-                    $"last is number {_slices[^1].Number}.";
+                //ScanImage.Source = _slices[0].Picture;
+                //InfoText.Text = $"Downloaded {_slices.Count} slices. First is number {_slices[0].Number}, " +
+                //$"last is number {_slices[^1].Number}.";
+                // 5. Make one thumbnail per slice and show the grid
+                BuildThumbnails();
+                ShowGridModel();
             }
             catch (Exception ex)
             {
@@ -174,8 +179,118 @@ namespace DicomViewer
                  $"Size: {columns} x {rows} pixels";
         }
 
+        private void BuildThumbnails()
+        {
+            ThumbnailPanel.Children.Clear();
+
+            for (int i = 0; i < _slices.Count; i++)
+            {
+                // the small picture, with the slice number under it
+                var picture = new Image
+                {
+                    Source = _slices[i].Picture,
+                    Width = 110,
+                    Height = 110,
+                    Stretch = Stretch.Uniform
+                };
+
+                var label = new TextBlock
+                {
+                    Text = _slices[i].Number.ToString(),
+                    Foreground = Brushes.White,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                var content = new StackPanel();
+                content.Children.Add(picture);
+                content.Children.Add(label);
+
+                // A border around it: transparent now, orange when it is the current slice
+                var thumbnail = new Border
+                { 
+                    Child = content,
+                    Margin = new Thickness(3),
+                    Padding = new Thickness(2),
+                    BorderThickness = new Thickness(2),
+                    BorderBrush = Brushes.Transparent,
+                    Background = Brushes.Transparent, // makes the whole box clickable
+                    Cursor = Cursors.Hand,
+                    Tag = i // rememeber its position in _slices
+                };
+                thumbnail.MouseLeftButtonUp += Thumbnail_Click;
+
+                ThumbnailPanel.Children.Add(thumbnail);
+            }
+        }
+
+        // One click on a thumbnail: open that slice in split mode
+        private void Thumbnail_Click(object sender, MouseButtonEventArgs e)
+        {
+            int position = (int)((Border)sender).Tag;
+            ShowSplitMode();
+            ShowSlice(position);
+        }
+
+        // Shows the slice at this position large, and highlights its thumbnail
+        private void ShowSlice(int position)
+        {
+            // Remove the highlight from the previous thumbnail
+            if (_current >= 0)
+                ((Border)ThumbnailPanel.Children[_current]).BorderBrush = Brushes.Transparent;
+
+            _current = position;
+
+            // Highlight the new one and scroll the filmstrip so it is visible
+            var thumbnail = (Border)ThumbnailPanel.Children[_current];
+            thumbnail.BringIntoView();
+
+            // The large picture, the text and the counter
+            ScanImage.Source = _slices[_current].Picture;
+            InfoText.Text = Describe(_slices[_current].Dataset);
+            NavigationLayer.Visibility = Visibility.Visible;
+            SliceCounter.Text = $"Slice {_current + 1} / {_slices.Count}";
+
+            // No < on the first slice, no > on the last
+            PreviousButton.IsEnabled = _current > 0;
+            NextButton.IsEnabled = _current < _slices.Count - 1;
+        }
+
+        // Forgets the old series (used before a new download or a single file)
+        private void ResetSeries()
+        {
+            _slices.Clear();
+            ThumbnailPanel.Children.Clear();
+            _current = -1;
+
+            ThumbnailColumn.Width = new GridLength(0);
+            SliceColumn.Width = new GridLength(1, GridUnitType.Star);
+            NavigationLayer.Visibility = Visibility.Collapsed;
+            BackToGridButton.Visibility = Visibility.Collapsed;
+        }
+
+        // ---- The three view modes: only the column width change ----
+        
+        // Mode 1: thumbnails use all the space
+        private void ShowGridModel()
+        {
+            ThumbnailColumn.Width = new GridLength(1, GridUnitType.Star);
+            SliceColumn.Width = new GridLength(0);
+            BackToGridButton.Visibility = Visibility.Collapsed;
+            InfoText.Text = $"{_slices.Count} slices. Click one to open it.";
+        }
+
+        // Mode 2: filmstrip on the left, large slice on the right
+        private void ShowSplitMode()
+        {
+            ThumbnailColumn.Width = new GridLength(160);
+            SliceColumn.Width = new GridLength(1, GridUnitType .Star);
+            BackToGridButton.Visibility = Visibility.Visible;
+        }
+
         // Events that still need to be implemented
-        private void BackToGridButton_Click(object sender, RoutedEventArgs e) {}
+        private void BackToGridButton_Click(object sender, RoutedEventArgs e) 
+        {
+            ShowGridModel();
+        }
         private void PreviousButton_Click(object sender, RoutedEventArgs e) { }
         private void NextButton_Click(object sender, RoutedEventArgs e) { }
         private void SliceView_MouseWheel(object sender, MouseWheelEventArgs e) { }
