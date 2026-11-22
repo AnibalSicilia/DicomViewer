@@ -241,6 +241,7 @@ namespace DicomViewer
 
             // Highlight the new one and scroll the filmstrip so it is visible
             var thumbnail = (Border)ThumbnailPanel.Children[_current];
+            thumbnail.BorderBrush = Brushes.Orange;
             thumbnail.BringIntoView();
 
             // The large picture, the text and the counter
