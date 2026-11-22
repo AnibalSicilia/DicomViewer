@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Globalization;
+using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -142,6 +143,7 @@ namespace DicomViewer
                 //$"last is number {_slices[^1].Number}.";
                 // 5. Make one thumbnail per slice and show the grid
                 BuildThumbnails();
+                BuildHeader();
                 ShowGridModel();
             }
             catch (Exception ex)
@@ -222,6 +224,45 @@ namespace DicomViewer
             }
         }
 
+        // Fills the header above the grid with information about the series
+        private void BuildHeader()
+        {
+            // Patient, study and series information is the same in every slice, so use the first
+            DicomDataset ds = _slices[0].Dataset;
+
+            // Turn the DICOM modality code into a name people know
+            string modality = ds.GetSingleValueOrDefault(DicomTag.Modality, "");
+            string modalityName = modality switch
+            {
+                "MR" => "MRI",
+                "CT" => "CT",
+                "PT" => "PET",
+                "US" => "Ultrasound",
+                "CR" or "DX" => "X-ray",
+                _ => modality
+            };
+
+            string series = ds.GetSingleValueOrDefault(DicomTag.SeriesDescription, "");
+            string patient = ds.GetSingleValueOrDefault(DicomTag.PatientName, "unknown");
+            string patientId = ds.GetSingleValueOrDefault(DicomTag.PatientID, "-");
+            string born = FormatDate(ds.GetSingleValueOrDefault(DicomTag.PatientBirthDate, ""));
+            string studyDate = FormatDate(ds.GetSingleValueOrDefault(DicomTag.StudyDate, ""));
+
+            HeaderTitle.Text = $"{modalityName} · {series}";
+            HeaderDetails.Text = $"Patient: {patient}   ID: {patientId}   Born: {born}   " +
+                $"Study date: {studyDate}   {_slices.Count} images";
+        }
+
+        //DICOM dates are written "20061201"; this shows them as "2006-12-01"
+        private static string FormatDate(string dicomDate)
+        {
+            if (DateTime.TryParseExact(dicomDate, "yyyyMMdd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out DateTime date))
+                return date.ToString("yyyy-MM-dd");
+
+            return dicomDate == "" ? "-" : dicomDate; // empty or unusual: show it as it is
+        }
+
         // One click on a thumbnail: open that slice in split mode
         private void Thumbnail_Click(object sender, MouseButtonEventArgs e)
         {
@@ -280,6 +321,7 @@ namespace DicomViewer
             ThumbnailColumn.Width = new GridLength(1, GridUnitType.Star);
             SliceColumn.Width = new GridLength(0);
             BackToGridButton.Visibility = Visibility.Collapsed;
+            GridHeader.Visibility = Visibility.Visible;
             InfoText.Text = $"{_slices.Count} slices. Click one to open it.";
         }
 
@@ -289,6 +331,7 @@ namespace DicomViewer
             ThumbnailColumn.Width = new GridLength(160);
             SliceColumn.Width = new GridLength(1, GridUnitType .Star);
             BackToGridButton.Visibility = Visibility.Visible;
+            GridHeader.Visibility = Visibility.Collapsed;
 
             SliceView.Cursor = Cursors.Hand;
             SliceView.ToolTip = "Double-click to show the filmstrip";
