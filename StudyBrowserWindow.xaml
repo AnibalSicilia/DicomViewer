@@ -1,0 +1,26 @@
+﻿<Window x:Class="DicomViewer.StudyBrowserWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"     
+        Title="StudyBrowserWindow" Height="500" Width="900"
+        WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="10">
+        
+        <!-- BOTTOM: status line-->
+        <TextBlock x:Name="StatusText" DockPanel.Dock="Bottom" Margin="0,10,0,0" Text="Loading studies..."/>
+        
+        <!-- MIDDLE: the table of studies -->
+        <ListView x:Name="StudyList">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Patient" Width="180" DisplayMemberBinding="{Binding Patient}" />
+                    <GridViewColumn Header="Patient ID" Width="110" DisplayMemberBinding="{Binding PatientId}" />
+                    <GridViewColumn Header="Study date" Width="90" DisplayMemberBinding="{Binding Date}" />
+                    <GridViewColumn Header="Modalities" Width="90" DisplayMemberBinding="{Binding Modalities}" />
+                    <GridViewColumn Header="Description" Width="280" DisplayMemberBinding="{Binding Description}" />
+                    <GridViewColumn Header="Series" Width="60" DisplayMemberBinding="{Binding SeriesCount}" />
+                </GridView>
+            </ListView.View>
+        </ListView>
+        
+    </DockPanel> 
+</Window>

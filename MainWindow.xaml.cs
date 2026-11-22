@@ -62,9 +62,17 @@ namespace DicomViewer
         private void ServerBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             DownloadButton.IsEnabled = ServerBox.SelectedItem != null;
-
+            BrowseButton.IsEnabled = ServerBox.SelectedItem != null;
             ServerPlaceholder.Visibility = ServerBox.SelectedItem == null
                 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // Opens the Studies window for the chosen server
+        private void BrowseButton_Click(object sender, RoutedEventArgs e)
+        {
+            var server = (PacsServer)ServerBox.SelectedItem;
+            var browser = new StudyBrowserWindow(server) { Owner = this };
+            browser.ShowDialog();
         }
 
         private void OpenButton_Click(object sender, RoutedEventArgs e)
