@@ -6,17 +6,21 @@ real PACS servers over **DICOMweb** (QIDO-RS, WADO-URI, WADO-RS).
 
 Built as a learning project to understand the DICOM standard, PACS workflows and DICOMweb.
 
-<!-- Add screenshots here, e.g.:
-![Grid view](docs/grid.png)
-![Split view](docs/split.png)
--->
-![Screenshot 1](Docs/img_dv.01.jpg)
+**Studies window**: QIDO-RS search on a PACS, then the series of the selected study
 
-![Screenshot 2](Docs/img_dv.02.jpg)
+![Studies window](Docs/img_dv.01.jpg)
 
-![Screenshot 3](Docs/img_dv.03.jpg)
+**Grid view**: all slices of a series, with a header read from the DICOM tags
 
-![Screenshot 4](Docs/img_dv.04.jpg)
+![Grid view](Docs/img_dv.02.jpg)
+
+**Split view**: filmstrip with the current slice highlighted, and `<` `>` navigation
+
+![Split view](Docs/img_dv.03.jpg)
+
+**Full view**: double-click the slice to use the whole window
+
+![Full view](Docs/img_dv.04.jpg)
 
 ## Features
 
@@ -31,6 +35,9 @@ Built as a learning project to understand the DICOM standard, PACS workflows and
 - Current slice highlighted in the filmstrip and scrolled into view
 - Double-click the large slice to switch between split and full view
 - Click empty space in the grid to clear the selection
+- **Window/level**: right-drag on the slice to change contrast (left/right = window) and brightness
+  (up/down = level); the values are shown next to the slice counter, kept while moving between
+  slices, and `R` resets them to the file's own values
 
 **PACS / DICOMweb**
 - Choose a server from a dropdown
@@ -74,6 +81,7 @@ limit and is intended for viewing, not bulk downloading.
    4. The series downloads and appears in the grid
 3. Click a thumbnail to open it; use `<` `>`, the mouse wheel or the arrow keys to move through the slices
 4. Double-click the large image for full view; *Back to grid* returns to the thumbnails
+5. Hold the **right mouse button** and drag on the large image to adjust window/level; press `R` to reset
 
 Note: series that are not images (for example **SEG** segmentations or **SR** reports)
 cannot be displayed. Slide microscopy (**SM**) whole-slide images are not supported.
@@ -89,9 +97,10 @@ cannot be displayed. Slide microscopy (**SM**) whole-slide images are not suppor
 
 ## Roadmap
 
-- [ ] Window/level: right-drag to change contrast, `R` to reset
-- [ ] Hide or grey out non-image series (SEG, SR) in the series list
+- [x] Window/level: right-drag to change contrast, `R` to reset
+- [ ] Show slices as they arrive (placeholders in the grid, filled during the download)
 - [ ] Faster downloads (several images in parallel) and a cancel button
+- [ ] Hide or grey out non-image series (SEG, SR) in the series list
 - [ ] Stop after several failures in a row (for example when the network is down)
 - [ ] Patient name search in the Studies window
 - [ ] Support compressed transfer syntaxes (fo-dicom codecs)
