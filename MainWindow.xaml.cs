@@ -1,6 +1,10 @@
-﻿using System.Globalization;
+﻿using FellowOakDicom;
+using FellowOakDicom.Imaging;
+using Microsoft.Win32;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Reflection.Emit;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -13,9 +17,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-using FellowOakDicom;
-using FellowOakDicom.Imaging;
-using Microsoft.Win32;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace DicomViewer
 {
@@ -41,13 +43,26 @@ namespace DicomViewer
         internal static readonly HttpClient Http = new HttpClient();
 
         // One slice of the series: its number, its DICOM data and its picture
-        private record Slice(int Number, DicomDataset Dataset, BitmapSource Picture);
+        private record   Slice(int Number, DicomDataset Dataset, BitmapSource Picture);
 
         // The whole series, in order. The grid, the filmstrip and < > all use this one list.
         private readonly List<Slice> _slices = new();
 
         // Which slice is shown large (position in _slices). -1 means none.
         private int _current = -1;
+
+        // Window/level chosen by the user (null = use the values stored in the file)
+        private double? _windowCenter;
+        private double? _windowWidth;
+
+        // The large image is a DicomImage, so we can re-render it with other window/level values
+        private DicomImage? _currentImage;
+
+        // Remembered while the right mouse button is held down
+        private bool _isAdjusting;
+        private Point _dragStart;
+        private double _startCenter;
+        private double _startWidth;
 
         public MainWindow()
         {
@@ -181,7 +196,7 @@ namespace DicomViewer
                 // Some worked, some didn't: show what we have and say how many are missing
                 if (failed > 0)
                 {
-                    InfoText.Text = $"{_slices.Count} of {instanceUids.Count} images shown;" +
+                    InfoText.Text = $"{_slices.Count} of {instanceUids.Count} images shown; " +
                         $"{failed} could not be downloaded or displayed. " +
                         $"Last error: {lastError}";
                 }
@@ -269,11 +284,20 @@ namespace DicomViewer
             return position < 0 ? -1 : position + start;
         }
 
-
-        // Turns the DICOM pixel data into a picture WPF can show
+        // Turns the DICOM pixel data into a picture WPF can show,
+        // using the window/level stored in the file.
+        // Used for opening files, downloaded slices and thumbnails.
         private static BitmapSource Render(DicomDataset ds)
         {
-            var dicomImage = new DicomImage(ds);
+            return Render(new DicomImage(ds));
+        }
+
+        // Renders an existing DicomImage, keeping any window/level changes made to it.
+        // A new DicomImage always starts with the file's values, so for window/level we keep
+        // one DicomImage (_currentImage), change its WindowCenter/WindowWidth, and re-render it here.
+        // The method above also uses this one, so the drawing code exists only once.
+        private static BitmapSource Render(DicomImage dicomImage)
+        {
             using IImage rendered = dicomImage.RenderImage();
             byte[] pixels = rendered.AsBytes();
 
@@ -398,11 +422,25 @@ namespace DicomViewer
             thumbnail.BorderBrush = Brushes.Orange;
             thumbnail.BringIntoView();
 
-            // The large picture, the text and the counter
-            ScanImage.Source = _slices[_current].Picture;
+            // The large picture: with the user's window/level if set, otherwise the ready-made picture
+            //ScanImage.Source = _slices[_current].Picture;
+            _currentImage = new DicomImage(_slices[_current].Dataset);
+            if(_windowCenter.HasValue && _windowWidth.HasValue)
+            {
+                _currentImage.WindowCenter = _windowCenter.Value;
+                _currentImage.WindowWidth = _windowWidth.Value;
+                ScanImage.Source = Render(_currentImage);
+            }
+            else
+            {
+                ScanImage.Source = _slices[_current].Picture;
+            }
+
+
             InfoText.Text = Describe(_slices[_current].Dataset);
             NavigationLayer.Visibility = Visibility.Visible;
-            SliceCounter.Text = $"Slice {_current + 1} / {_slices.Count}";
+            UpdateCounter();
+            //SliceCounter.Text = $"Slice {_current + 1} / {_slices.Count}";
 
             // No < on the first slice, no > on the last
             PreviousButton.IsEnabled = _current > 0;
@@ -423,6 +461,12 @@ namespace DicomViewer
 
             SliceView.Cursor = null;
             SliceView.ToolTip = null;
+
+            _windowCenter = null; // forget the user's window/level...
+            _windowWidth = null; // ...so the next series starts with its own values
+            _currentImage = null; // no image is being adjusted anymore
+            _isAdjusting = false; // never start a new series in the middle of a drag
+
         }
 
         // ---- The three view modes: only the column width change ----
@@ -472,6 +516,73 @@ namespace DicomViewer
 
             ShowSlice(target);
         }
+
+        // Shows the slice number and the current window/level under the image
+        private void UpdateCounter()
+        {
+            string windowLevel = _currentImage == null
+                ? ""
+                : $"  ·  W {_currentImage.WindowWidth:0} L {_currentImage.WindowCenter:0}";
+            SliceCounter.Text = $"Slice {_current + 1} / {_slices.Count}{windowLevel}";
+        }
+
+        // Right button down: start adjusting
+        private void SliceView_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (_currentImage == null)
+                return; // no series open
+
+            _isAdjusting = true;
+            _dragStart = e.GetPosition(SliceView);
+            _startCenter = _currentImage.WindowCenter;
+            _startWidth = _currentImage.WindowWidth;
+
+            SliceView.CaptureMouse();   // keep getting mouse moves even outside the image
+            e.Handled = true;
+        }
+
+        // Mouse moves while the right button is down: change the contrast
+        private void SliceView_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_isAdjusting || _currentImage == null)
+                return;
+
+            // The right button was released while we didn't notice (e.g Alt+Tab): stop adjusting
+            if (e.RightButton != MouseButtonState.Pressed)
+            {
+                _isAdjusting = false;
+                SliceView.ReleaseMouseCapture();
+                    return;
+            }
+
+            Point now = e.GetPosition(SliceView);
+            double dx = now.X - _dragStart.X;   // right = wider window (softer contrast)
+            double dy = now.Y - _dragStart.Y;   // down = higher level (darker image)
+
+            // Move faster for wide windows (CT) and slower for narrow ones (MR)
+            double speed = _startWidth / 200;
+
+            _windowWidth = Math.Max(1, _startWidth + dx * speed);
+            _windowCenter = _startCenter + dy * speed;
+
+            _currentImage.WindowWidth = _windowWidth.Value;
+            _currentImage.WindowCenter = _windowCenter.Value;
+            ScanImage.Source = Render(_currentImage);
+            UpdateCounter();
+        }
+
+        // Right button up: stop adjusting
+        private void SliceView_MouseRightButtonUp(object center,  MouseButtonEventArgs e)
+        {
+            if (!_isAdjusting)
+                return;
+
+            _isAdjusting = false;
+            SliceView.ReleaseMouseCapture();
+            e.Handled = true;
+        }
+
+
 
         // Events that still need to be implemented
         private void BackToGridButton_Click(object sender, RoutedEventArgs e) 
@@ -527,6 +638,13 @@ namespace DicomViewer
             else if (e.Key == Key.Right || e.Key == Key.Down)
             {
                 MoveBy(+1);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.R && _current >= 0)
+            {
+                _windowCenter = null;
+                _windowWidth = null;
+                ShowSlice(_current);
                 e.Handled = true;
             }
         }

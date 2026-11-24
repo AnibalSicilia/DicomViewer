@@ -63,9 +63,10 @@
             <!-- RIGHT COLUMN: one large slice with < > on its edges-->
             <Grid x:Name="SliceView" Grid.Column="1" Background="Black"
                   MouseWheel="SliceView_MouseWheel"
-                  MouseLeftButtonDown="SliceView_MouseLeftButtonDown">
-
-
+                  MouseLeftButtonDown="SliceView_MouseLeftButtonDown"
+                  MouseRightButtonDown="SliceView_MouseRightButtonDown"
+                  MouseMove="SliceView_MouseMove"
+                  MouseRightButtonUp="SliceView_MouseRightButtonUp">
 
                 <!-- the large image -->
                 <Image x:Name="ScanImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
