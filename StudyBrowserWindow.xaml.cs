@@ -19,8 +19,12 @@ namespace DicomViewer
         // The servers we are browsing
         private readonly PacsServer _server;
         // What the user chose (MainWindow reads these after the windows closes)
-        public string SelectedStudyUid { get; private set; } = "";
-        public string SelectedSeriesUid { get; private set; } = "";
+        // public string SelectedStudyUid { get; private set; } = "";
+        // The server this windows browses (MainWindow checks it before a second window
+        public PacsServer Server => _server;
+        //public string SelectedSeriesUid { get; private set; } = "";
+        // Raised when the user opens a series, MainWindow listens and downloads it; this window stay open.
+        public event Action<PacsServer, string, string>? SeriesChosen;
         public StudyBrowserWindow(PacsServer server)
         {
             InitializeComponent();
@@ -143,15 +147,19 @@ namespace DicomViewer
             OpenSelectedSeries();
         }
 
+        // Tell MainWindow which series to open. The window stays open, so the user can pick another
         private void OpenSelectedSeries()
         {
             var study = (StudyRow)StudyList.SelectedItem;
             var series = (SeriesRow)SeriesList.SelectedItem;
 
-            SelectedStudyUid = study.StudyUid;
-            SelectedSeriesUid = series.SeriesUid;
+            SeriesChosen?.Invoke(_server, study.StudyUid, series.SeriesUid);
 
-            DialogResult = true; // closes the window; ShowDialog() returns true;
+            //SelectedStudyUid = study.StudyUid;
+            // SelectedSeriesUid = series.SeriesUid;
+
+            //DialogResult = true; // closes the window; ShowDialog() returns true;
+
         }
     }
 }

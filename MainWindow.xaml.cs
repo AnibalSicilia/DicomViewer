@@ -1,5 +1,6 @@
 ﻿using FellowOakDicom;
 using FellowOakDicom.Imaging;
+using FellowOakDicom.Imaging.LUT;
 using Microsoft.Win32;
 using System.Globalization;
 using System.IO;
@@ -63,6 +64,12 @@ namespace DicomViewer
         // Which slice is shown large (position in _slices). -1 means none.
         private int _current = -1;
 
+        // The Studies window, while it is open (null when closed)
+        private StudyBrowserWindow _browser;
+
+        // True while a series is downloading
+        private bool _isDownloading;
+
         // Window/level chosen by the user (null = use the values stored in the file)
         private double? _windowCenter;
         private double? _windowWidth;
@@ -91,14 +98,40 @@ namespace DicomViewer
         }
 
         // Opens the Studies window; if the user pick a series, download it
-        private async void BrowseButton_Click(object sender, RoutedEventArgs e)
+        private void BrowseButton_Click(object sender, RoutedEventArgs e)
         {
             var server = (PacsServer)ServerBox.SelectedItem;
-            var browser = new StudyBrowserWindow(server) { Owner = this };
-            if (browser.ShowDialog() != true)
-                return; // closed without choosing a series
 
-            await DownloadSeriesAsync(server, browser.SelectedStudyUid, browser.SelectedSeriesUid);
+            // Already open for this server: just bring it to the front
+            if (_browser != null && _browser.Server == server)
+            {
+                _browser.Activate();
+                return;
+            }
+
+            // Open for another server: close that one first
+            _browser?.Close();
+
+            var browser = new StudyBrowserWindow(server) { Owner = this };
+            browser.SeriesChosen += Browser_SeriesChosen; // listen for "a series was chosen"
+            browser.Closed += (s, args) =>
+            {
+                if (ReferenceEquals(_browser, s))
+                    _browser = null;
+            };
+
+            _browser = browser;
+            browser.Show();
+        }
+
+        private async void Browser_SeriesChosen(PacsServer server, string studyUid, string seriesUid)
+        {
+            if (_isDownloading)
+            {
+                MessageBox.Show("A series is still downloading. Please wait until it has finished", "Please wait");
+            }
+
+            await DownloadSeriesAsync(server, studyUid, seriesUid);
         }
 
         private void OpenButton_Click(object sender, RoutedEventArgs e)
@@ -134,7 +167,8 @@ namespace DicomViewer
 
         private async Task DownloadSeriesAsync(PacsServer server, string studyUid, string seriesUid)
         {
-            BrowseButton.IsEnabled = false; // stop double clicks while downloading
+            // BrowseButton.IsEnabled = false; // stop double clicks while downloading
+            _isDownloading = true; // a second series chosen now gets "please wait"
             OpenButton.IsEnabled = false;   // opening a file would clear the series mid-download
             ResetSeries();  // the old series gets cleared, whatever happens next
             InfoText.Text = "Asking the PACS for the list of images...";
@@ -235,7 +269,8 @@ namespace DicomViewer
             }
             finally
             {
-                BrowseButton.IsEnabled = true;
+                // BrowseButton.IsEnabled = true;
+                _isDownloading = false;
                 OpenButton.IsEnabled = true;
             }
         }
