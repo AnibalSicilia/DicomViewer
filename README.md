@@ -6,6 +6,15 @@ real PACS servers over **DICOMweb** (QIDO-RS, WADO-URI, WADO-RS).
 
 Built as a learning project to understand the DICOM standard, PACS workflows and DICOMweb.
 
+## Demo
+
+[![Watch the demo video](Docs/img_dv.02.jpg)](Docs/DicomViewer_Demo.mp4)
+
+**[Watch the demo video (1:28)](Docs/DicomViewer_Demo.mp4)**: browsing both servers (NCI Imaging Data
+Commons with WADO-RS and the Orthanc demo with WADO-URI), progressive loading, and window/level.
+
+## Screenshots
+
 **Studies window**: QIDO-RS search on a PACS, then the series of the selected study
 
 ![Studies window](Docs/img_dv.01.jpg)
@@ -42,7 +51,10 @@ Built as a learning project to understand the DICOM standard, PACS workflows and
 **PACS / DICOMweb**
 - Choose a server from a dropdown
 - **Studies window**: search studies with **QIDO-RS** (`/studies`), then the series of a study (`/studies/{uid}/series`)
-- Open a series by double-click, Enter or the *Open series* button
+- Open a series by double-click, Enter or the *Open series* button; the Studies window **stays open**,
+  so you can open another series without searching again (close it when you're done)
+- *Browse studies...* brings the open Studies window to the front; changing server opens a new one
+- Choosing a series while another is still downloading asks you to wait
 - Download each image with **WADO-URI** or **WADO-RS**, depending on the server
 - WADO-RS: requests uncompressed DICOM (Explicit VR Little Endian) and unwraps the `multipart/related` response
 - Slices sorted by Instance Number (0020,0013), taken from the QIDO-RS instance list before downloading
@@ -81,7 +93,8 @@ limit and is intended for viewing, not bulk downloading.
 2. **From a PACS:**
    1. Choose a server in the *Server* dropdown
    2. Click *Browse studies...*
-   3. Click a study to see its series, then double-click a series (or select it and press Enter)
+   3. Click a study to see its series, then double-click a series (or select it and press Enter).
+      The Studies window stays open, so you can open another series later
    4. The grid appears at once with grey placeholders, which fill in as the images download;
       you can open any slice that has already arrived
 3. Click a thumbnail to open it; use `<` `>`, the mouse wheel or the arrow keys to move through the slices
@@ -96,7 +109,7 @@ cannot be displayed. Slide microscopy (**SM**) whole-slide images are not suppor
 | File | Purpose |
 |---|---|
 | `MainWindow.xaml` / `.cs` | Main window: views, navigation, downloading and rendering |
-| `StudyBrowserWindow.xaml` / `.cs` | Studies window: QIDO-RS study and series search |
+| `StudyBrowserWindow.xaml` / `.cs` | Studies window: QIDO-RS study and series search; raises `SeriesChosen` |
 | `PacsServer.cs` | `PacsServer` record and `RetrieveMethod` enum |
 | `DicomJson.cs` | Helpers to read values from DICOM JSON (QIDO-RS answers) |
 
@@ -104,7 +117,8 @@ cannot be displayed. Slide microscopy (**SM**) whole-slide images are not suppor
 
 - [x] Window/level: right-drag to change contrast, `R` to reset
 - [x] Show slices as they arrive (placeholders in the grid, filled during the download)
-- [ ] Keep the Studies window open while browsing
+- [x] Keep the Studies window open while browsing
+- [ ] Ask before closing the app while a series is downloading
 - [ ] Faster downloads (several images in parallel) and a cancel button
 - [ ] Hide or grey out non-image series (SEG, SR) in the series list
 - [ ] Stop after several failures in a row (for example when the network is down)
