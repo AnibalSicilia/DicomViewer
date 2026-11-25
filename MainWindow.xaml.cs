@@ -4,7 +4,6 @@ using Microsoft.Win32;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
-using System.Reflection.Emit;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -17,7 +16,6 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace DicomViewer
 {
@@ -31,7 +29,7 @@ namespace DicomViewer
         {
             new PacsServer("Orthanc demo (Belgium)",
                            "https://orthanc.uclouvain.be/demo/dicom-web",
-                           "https://orthanc.uclouvain.be/demo/wado", 
+                           "https://orthanc.uclouvain.be/demo/wado",
                            RetrieveMethod.WadoUri),
             new PacsServer("NCI Imaging Data Commons",
                            "https://proxy.imaging.datacommons.cancer.gov/current/viewer-only-no-downloads-see-tinyurl-dot-com-slash-3j3d9jyp/dicomWeb",
@@ -43,7 +41,21 @@ namespace DicomViewer
         internal static readonly HttpClient Http = new HttpClient();
 
         // One slice of the series: its number, its DICOM data and its picture
-        private record   Slice(int Number, DicomDataset Dataset, BitmapSource Picture);
+        //private record   Slice(int Number, DicomDataset Dataset, BitmapSource Picture);
+
+        // One slice of the series. It starts as a placeholder and is filled in when its image arrives,
+        // so it changes over time: a class, not a record. This is to implement lazy loading
+        private class Slice
+        {
+            public int Number; // Instance Number (0020,0013), for sorting
+            public string InstanceUid = ""; //SOP Instance UID (0008, 0018), for downloading
+            public DicomDataset? Dataset;   // null until the image has arrived
+            public BitmapSource? Picture;   // null until the image has arrived
+            public bool Failed; // true if downloading of rendering failed
+        }
+
+        // Dark grey background for thumbnais whose image hasn't arrived yet
+        private static readonly Brush PlaceholderBrush = new SolidColorBrush(Color.FromRgb(40, 40, 40));
 
         // The whole series, in order. The grid, the filmstrip and < > all use this one list.
         private readonly List<Slice> _slices = new();
@@ -123,6 +135,8 @@ namespace DicomViewer
         private async Task DownloadSeriesAsync(PacsServer server, string studyUid, string seriesUid)
         {
             BrowseButton.IsEnabled = false; // stop double clicks while downloading
+            OpenButton.IsEnabled = false;   // opening a file would clear the series mid-download
+            ResetSeries();  // the old series gets cleared, whatever happens next
             InfoText.Text = "Asking the PACS for the list of images...";
 
             try
@@ -131,75 +145,88 @@ namespace DicomViewer
                 string listUrl = $"{server.DicomWebRoot}/studies/{studyUid}/series/{seriesUid}/instances?limit=1000";
                 string json = await Http.GetStringAsync(listUrl);
 
-                // 2. Read each image's SOP Instance UID (tag 0008,0018) from the JSON
-                var instanceUids = new List<string>();
+                // 2. One place holder per image, with its UID and Instance Number from the list
+                var placeholders = new List<Slice>();
 
-
-                if (!string.IsNullOrWhiteSpace(json))                                          
+                if (!string.IsNullOrWhiteSpace(json))
                 {
                     using JsonDocument doc = JsonDocument.Parse(json);
                     foreach (JsonElement item in doc.RootElement.EnumerateArray())
-                        instanceUids.Add(DicomJson.GetText(item, "00080018"));
+                    {
+                        int number = int.TryParse(DicomJson.GetText(item, "00200013"), out int n)
+                            ? n : placeholders.Count + 1; // no number in the list: keep the server's order
+                        placeholders.Add(new Slice
+                        {
+                            InstanceUid = DicomJson.GetText(item, "00080018"),
+                            Number = number
+                        });
+                    }
                 }
 
-                if (instanceUids.Count == 0)
-                {                                                                              
-                    InfoText.Text = "The server returned no images for this series.";         
+                if (placeholders.Count == 0)
+                {
+                    InfoText.Text = "The server returned no images for this series.";
                     return;
                 }
 
-                // 3. WADO-URI: download each image, one after the other
-                // _slices.Clear();
-                ResetSeries();
+                // 3. Sort BEFORE downloading, and show the grid of placeholders straight away
+                _slices.AddRange(placeholders.OrderBy(s => s.Number));
+                BuildThumbnails();
+                HeaderTitle.Text = "Loading series...";
+                HeaderDetails.Text = "";
+                ShowGridMode();
+
+                // 4. Download each image in order, and fill its placeholder as soon as it arrives
                 int failed = 0;
                 string lastError = "";
+                bool headerDone = false;
 
-                for (int i = 0; i < instanceUids.Count; i++)
+                for (int i = 0; i < _slices.Count; i++)
                 {
-                    InfoText.Text = $"Downloading image {i + 1} / {instanceUids.Count}..." +
+                    Slice slice = _slices[i];
+                    InfoText.Text = $"Downloading image {i + 1} / {_slices.Count}..." +
                                     (failed > 0 ? $"  ({failed} failed)" : "");
 
                     try
                     {
-                        byte[] data = await DownloadInstanceAsync(server, studyUid, seriesUid, instanceUids[i]);
+                        byte[] data = await DownloadInstanceAsync(server, studyUid, seriesUid, slice.InstanceUid);
 
                         using var stream = new MemoryStream(data);
-                        DicomDataset ds = DicomFile.Open(stream, FileReadOption.ReadAll).Dataset;
+                        slice.Dataset = DicomFile.Open(stream, FileReadOption.ReadAll).Dataset;
+                        slice.Picture = Render(slice.Dataset);
 
-                        int number = ds.GetSingleValueOrDefault(DicomTag.InstanceNumber, 0);
-                        _slices.Add(new Slice(number, ds, Render(ds)));
+                        if (!headerDone)
+                        {
+                            BuildHeader();
+                            headerDone = true;
+                        }
                     }
                     catch (Exception ex)
                     {
                         failed++;
                         lastError = $"{ex.GetType().Name}: {ex.Message}";
+                        slice.Failed = true;
                     }
+
+                    FillThumbnail(i); // show the picture, or mark it as failed
                 }
 
-                // Nothing worked at all: say why
-                if(_slices.Count == 0)
+                // 5. Final message
+                int loaded = _slices.Count(s => s.Picture != null);
+
+                if (loaded == 0)
                 {
                     InfoText.Text = "Download failed";
-                    MessageBox.Show($"None of the {instanceUids.Count} images could be shown.\n\n" +
+                    MessageBox.Show($"None of the {_slices.Count} images could be shown.\n\n" +
                         $"Last error:\n{lastError}", "Error");
+                    ResetSeries();
                     return;
                 }
 
-                // 4. Sort by instance number, so the slices go in order through the head
-                _slices.Sort((a, b) => a.Number.CompareTo(b.Number));
+                InfoText.Text = failed > 0 ?
+                    $"{loaded} of {_slices.Count} images shown; {failed} could not be downloaded or displayed. Last error: {lastError}"
+                    : $"{loaded} slices. Click one to open it.";
 
-                // 5. Make one thumbnail per slice and show the grid
-                BuildThumbnails();
-                BuildHeader();
-                ShowGridMode();
-
-                // Some worked, some didn't: show what we have and say how many are missing
-                if (failed > 0)
-                {
-                    InfoText.Text = $"{_slices.Count} of {instanceUids.Count} images shown; " +
-                        $"{failed} could not be downloaded or displayed. " +
-                        $"Last error: {lastError}";
-                }
             }
             catch (Exception ex)
             {
@@ -209,6 +236,7 @@ namespace DicomViewer
             finally
             {
                 BrowseButton.IsEnabled = true;
+                OpenButton.IsEnabled = true;
             }
         }
 
@@ -218,7 +246,7 @@ namespace DicomViewer
             // WADO-URI: one address wtih parameters; the answer is the plain .dcm file
             if (server.Retrieve == RetrieveMethod.WadoUri)
             {
-                string url = $"{server.WadoUriRoot}?requestType=WADO" + 
+                string url = $"{server.WadoUriRoot}?requestType=WADO" +
                     $"&studyUID={studyUid}&seriesUID={seriesUid}" +
                     $"&objectUID={instanceUid}&contentType=application/dicom";
                 return await Http.GetByteArrayAsync(url);
@@ -274,7 +302,7 @@ namespace DicomViewer
                 throw new InvalidDataException("Multipart answer has no closing boundary");
 
             return body[dataStart..dataEnd];
-              
+
         }
 
         // Finds a sequesnce of bytes inside a larger array, starting at 'start'. Returns -1 if not found
@@ -344,13 +372,14 @@ namespace DicomViewer
 
                 // A border around it: transparent now, orange when it is the current slice
                 var thumbnail = new Border
-                { 
+                {
                     Child = content,
                     Margin = new Thickness(3),
                     Padding = new Thickness(2),
                     BorderThickness = new Thickness(2),
                     BorderBrush = Brushes.Transparent,
-                    Background = Brushes.Transparent, // makes the whole box clickable
+                    // Background = Brushes.Transparent, // makes the whole box clickable
+                    Background = _slices[i].Picture == null ? PlaceholderBrush : Brushes.Transparent, // grey = not arrived yet; any background makes the box clickable
                     Cursor = Cursors.Hand,
                     Tag = i // rememeber its position in _slices
                 };
@@ -360,11 +389,32 @@ namespace DicomViewer
             }
         }
 
+        // Updates one thumbnail when its image has arrived (or failed)
+        private void FillThumbnail(int position)
+        {
+            Slice slice = _slices[position];
+            var thumbnail = (Border)ThumbnailPanel.Children[position];
+            var content = (StackPanel)thumbnail.Child;
+            var picture = (Image)content.Children[0];   // the picture is the first child...
+            var label = (TextBlock)content.Children[1];  // ...and the number is the second
+
+            if (slice.Picture != null)
+            {
+                picture.Source = slice.Picture;
+                thumbnail.Background = Brushes.Transparent; // no longer a placeholder
+            }
+            else if (slice.Failed)
+            {
+                label.Text = $"{slice.Number} X";
+                label.Foreground = Brushes.IndianRed;
+            }
+        }
+
         // Fills the header above the grid with information about the series
         private void BuildHeader()
         {
             // Patient, study and series information is the same in every slice, so use the first
-            DicomDataset ds = _slices[0].Dataset;
+            DicomDataset ds = _slices.First(s => s.Dataset != null).Dataset!;
 
             // Turn the DICOM modality code into a name people know
             string modality = ds.GetSingleValueOrDefault(DicomTag.Modality, "");
@@ -403,6 +453,12 @@ namespace DicomViewer
         private void Thumbnail_Click(object sender, MouseButtonEventArgs e)
         {
             int position = (int)((Border)sender).Tag;
+            if (_slices[position].Picture == null)  // not arrived yet (or failed)
+            {
+                e.Handled = true;
+                return;
+            }
+
             ShowSplitMode();
             ShowSlice(position);
             e.Handled = true; // Don't let the click reach the empty-space handler
@@ -424,8 +480,8 @@ namespace DicomViewer
 
             // The large picture: with the user's window/level if set, otherwise the ready-made picture
             //ScanImage.Source = _slices[_current].Picture;
-            _currentImage = new DicomImage(_slices[_current].Dataset);
-            if(_windowCenter.HasValue && _windowWidth.HasValue)
+            _currentImage = new DicomImage(_slices[_current].Dataset!);
+            if (_windowCenter.HasValue && _windowWidth.HasValue)
             {
                 _currentImage.WindowCenter = _windowCenter.Value;
                 _currentImage.WindowWidth = _windowWidth.Value;
@@ -437,7 +493,7 @@ namespace DicomViewer
             }
 
 
-            InfoText.Text = Describe(_slices[_current].Dataset);
+            InfoText.Text = Describe(_slices[_current].Dataset!);
             NavigationLayer.Visibility = Visibility.Visible;
             UpdateCounter();
             //SliceCounter.Text = $"Slice {_current + 1} / {_slices.Count}";
@@ -466,11 +522,15 @@ namespace DicomViewer
             _windowWidth = null; // ...so the next series starts with its own values
             _currentImage = null; // no image is being adjusted anymore
             _isAdjusting = false; // never start a new series in the middle of a drag
+            ScanImage.Source = null;    // remove the old large image
+            HeaderTitle.Text = "";  // remove the old header
+            HeaderDetails.Text = "";
+            GridHeader.Visibility = Visibility.Collapsed;
 
         }
 
         // ---- The three view modes: only the column width change ----
-        
+
         // Mode 1: thumbnails use all the space
         private void ShowGridMode()
         {
@@ -485,12 +545,12 @@ namespace DicomViewer
         private void ShowSplitMode()
         {
             ThumbnailColumn.Width = new GridLength(160);
-            SliceColumn.Width = new GridLength(1, GridUnitType .Star);
+            SliceColumn.Width = new GridLength(1, GridUnitType.Star);
             BackToGridButton.Visibility = Visibility.Visible;
             GridHeader.Visibility = Visibility.Collapsed;
 
             SliceView.Cursor = Cursors.Hand;
-            SliceView.ToolTip = "Double-click to show the filmstrip";
+            SliceView.ToolTip = "Double-click for full view";
         }
 
         // Mode 3: only the large slice, using all the space
@@ -511,6 +571,8 @@ namespace DicomViewer
                 return; // no series open
 
             int target = _current + step;
+            while (target >= 0 && target < _slices.Count && _slices[target].Picture == null)
+                target += step; // skip slices that haven't arrived (or failed)
             if (target < 0 || target >= _slices.Count)
                 return; // already at the first or last slice
 
@@ -552,7 +614,7 @@ namespace DicomViewer
             {
                 _isAdjusting = false;
                 SliceView.ReleaseMouseCapture();
-                    return;
+                return;
             }
 
             Point now = e.GetPosition(SliceView);
@@ -572,7 +634,7 @@ namespace DicomViewer
         }
 
         // Right button up: stop adjusting
-        private void SliceView_MouseRightButtonUp(object center,  MouseButtonEventArgs e)
+        private void SliceView_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
             if (!_isAdjusting)
                 return;
@@ -582,10 +644,7 @@ namespace DicomViewer
             e.Handled = true;
         }
 
-
-
-        // Events that still need to be implemented
-        private void BackToGridButton_Click(object sender, RoutedEventArgs e) 
+        private void BackToGridButton_Click(object sender, RoutedEventArgs e)
         {
             ShowGridMode();
         }
@@ -593,25 +652,25 @@ namespace DicomViewer
         // ---- Navigation ----
 
         // < and > buttons
-        private void PreviousButton_Click(object sender, RoutedEventArgs e) 
-        { 
+        private void PreviousButton_Click(object sender, RoutedEventArgs e)
+        {
             MoveBy(-1);
         }
-        private void NextButton_Click(object sender, RoutedEventArgs e) 
+        private void NextButton_Click(object sender, RoutedEventArgs e)
         {
             MoveBy(+1);
         }
 
         // Mouse wheel: up = previous slice, down = next slice
-        private void SliceView_MouseWheel(object sender, MouseWheelEventArgs e) 
-        { 
-            MoveBy(e.Delta > 0  ? -1 : +1);
+        private void SliceView_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            MoveBy(e.Delta > 0 ? -1 : +1);
             e.Handled = true;
         }
 
         // Double click on the large slice: switch between Split and Full mode
-        private void SliceView_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) 
-        { 
+        private void SliceView_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
             if (e.ClickCount != 2 || _current < 0)
                 return;     // not a double click, or no series open
 
@@ -628,9 +687,9 @@ namespace DicomViewer
         }
 
         // Arrow keys: left/up = previous, right/down = next
-        private void Window_KeyDown(object sender, KeyEventArgs e) 
+        private void Window_KeyDown(object sender, KeyEventArgs e)
         {
-            if(e.Key == Key.Left || e.Key == Key.Up)
+            if (e.Key == Key.Left || e.Key == Key.Up)
             {
                 MoveBy(-1);
                 e.Handled = true;

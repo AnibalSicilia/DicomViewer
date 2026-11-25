@@ -45,8 +45,12 @@ Built as a learning project to understand the DICOM standard, PACS workflows and
 - Open a series by double-click, Enter or the *Open series* button
 - Download each image with **WADO-URI** or **WADO-RS**, depending on the server
 - WADO-RS: requests uncompressed DICOM (Explicit VR Little Endian) and unwraps the `multipart/related` response
-- Slices sorted by Instance Number (0020,0013)
-- Partial downloads: images that fail are skipped, the rest are shown, and the number of failures is reported
+- Slices sorted by Instance Number (0020,0013), taken from the QIDO-RS instance list before downloading
+- **Progressive loading**: the grid appears right away with a placeholder for every slice, and each
+  placeholder is filled as its image arrives; slices can be opened while the rest are still downloading
+- Partial downloads: images that fail are marked in the grid, the rest are shown, and the number of
+  failures is reported
+- The previous series is cleared as soon as a new one is chosen, whether the new one loads or not
 
 ## Servers
 
@@ -78,7 +82,8 @@ limit and is intended for viewing, not bulk downloading.
    1. Choose a server in the *Server* dropdown
    2. Click *Browse studies...*
    3. Click a study to see its series, then double-click a series (or select it and press Enter)
-   4. The series downloads and appears in the grid
+   4. The grid appears at once with grey placeholders, which fill in as the images download;
+      you can open any slice that has already arrived
 3. Click a thumbnail to open it; use `<` `>`, the mouse wheel or the arrow keys to move through the slices
 4. Double-click the large image for full view; *Back to grid* returns to the thumbnails
 5. Hold the **right mouse button** and drag on the large image to adjust window/level; press `R` to reset
@@ -98,7 +103,8 @@ cannot be displayed. Slide microscopy (**SM**) whole-slide images are not suppor
 ## Roadmap
 
 - [x] Window/level: right-drag to change contrast, `R` to reset
-- [ ] Show slices as they arrive (placeholders in the grid, filled during the download)
+- [x] Show slices as they arrive (placeholders in the grid, filled during the download)
+- [ ] Keep the Studies window open while browsing
 - [ ] Faster downloads (several images in parallel) and a cancel button
 - [ ] Hide or grey out non-image series (SEG, SR) in the series list
 - [ ] Stop after several failures in a row (for example when the network is down)
